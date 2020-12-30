@@ -1,0 +1,210 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: wildfly-template #${NAMESPACE}-template
+message: Your template has been created.
+metadata:
+  name: wildfly-template #${NAMESPACE}-template
+objects:
+
+#image stream
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    namespace: ${NAMESPACE}
+
+#route
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    namespace: ${NAMESPACE}
+  spec:
+    port:
+      targetPort: 8080-tcp
+    to:
+      kind: Service
+      name: ${NAME}
+      weight: 100
+    wildcardPolicy: None
+
+#route admin
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}-admin
+    namespace: ${NAMESPACE}
+  spec:
+    port:
+      targetPort: 9990-tcp
+    to:
+      kind: Service
+      name: ${NAME}
+      weight: 100
+    wildcardPolicy: None
+
+#service
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    namespace: ${NAMESPACE}
+  spec:
+    ports:
+      - name: 8080-tcp
+        port: 8080
+        protocol: TCP
+        targetPort: 8080
+      - name: 9990-tcp
+        port: 9990
+        protocol: TCP
+        targetPort: 9990
+    selector:
+      deploymentconfig: ${NAME}
+
+#build config
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    namespace: ${NAMESPACE}
+  spec:
+    nodeSelector: null
+    output:
+      to:
+        kind: ImageStreamTag
+        name: '${NAME}:latest'
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        ref: master
+        uri: '${SOURCE_REPOSITORY_URL}'
+      type: Git
+    strategy:
+      dockerStrategy:
+        from:
+          kind: DockerImage
+          name: 'jboss/wildfly:19.0.0.Final'
+      type: Docker
+    triggers:
+      - imageChange:
+          lastTriggeredImageID: #>-
+            #docker.io/openshift/wildfly-101-centos7@sha256:7775d40f77e22897dc760b76f1656f67ef6bd5561b4d74fbb030b977f61d48e8
+        type: ImageChange
+      - type: ConfigChange
+      - generic:
+          secret: 9fdf619e0aea935a
+        type: Generic
+      - github:
+          secret: 43ac13d4078565c4
+        type: GitHub
+
+#deployment
+- apiVersion: apps.openshift.io/v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    namespace: ${NAMESPACE}
+  spec:
+    replicas: 1
+    selector:
+      deploymentconfig: ${NAME}
+    strategy:
+      activeDeadlineSeconds: 21600
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          app: ${NAME}
+          deploymentconfig: ${NAME}
+      spec:
+        containers:
+          - image: '${NAME}:latest'
+            name: ${NAME}
+            ports:
+              - containerPort: 8080
+                protocol: TCP
+              - containerPort: 9990
+                protocol: TCP
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            env:
+              - name: MYSQL_DATABASE
+                value: ${MYSQL_DATABASE} #"bank"
+              - name: MYSQL_HOST
+                value: ${MYSQL_HOST} #"mysql.esercitazione2.svc:3306"
+              - name: DEPLOYMENT
+                value: ${DEPLOYMENT}
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+    test: false
+    triggers:
+    - imageChangeParams:
+          automatic: true
+          containerNames:
+            - ${NAME}
+          from:
+            kind: ImageStreamTag
+            name: '${NAME}:latest'
+            namespace: ${NAMESPACE}
+      type: ImageChange
+    - type: ConfigChange
+
+#parameters
+parameters:
+- description: The name assigned to all of the frontend objects defined in this template.
+  displayName: Name
+  name: NAME
+  value: "wildfly"
+
+- description: The URL of the repository with your application source code.
+  displayName: Git Repository URL
+  name: SOURCE_REPOSITORY_URL
+  value: "https://github.com/ASSD-UniSannio/EsWildfly.git"
+
+- description: The OpenShift Namespace where the ImageStream resides.
+  displayName: Namespace
+  name: NAMESPACE
+  value: "esercitazione2"
+
+- description: The name of the database to create.
+  displayName: Database name
+  name: MYSQL_DATABASE
+  value: "bank"
+
+- description: MySql hostname.
+  displayName: Hostname
+  name: MYSQL_HOST
+  value: "mysql:3306"
+
+- description: War to deploy.
+  displayName: Deployment
+  name: DEPLOYMENT
+  value: "Monolith-1.0.war"
